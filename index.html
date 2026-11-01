@@ -1,0 +1,727 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Шахи зі Stockfish</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="theme-color" content="#6d86a3">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Шахи">
+<style>
+:root{--bg:#f6f4ef;--fg:#14181f;--l:#e4e9f0;--d:#6d86a3;--sel:#f2b01e;--tgt:#1f9d55;--btn:#14181f;--btnfg:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#10141a;--fg:#f1f3f6;--l:#aab6c6;--d:#4a5f7a;--btn:#f1f3f6;--btnfg:#10141a}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;padding:12px;background:var(--bg);color:var(--fg);font:18px/1.45 system-ui,-apple-system,sans-serif;max-width:560px;margin-inline:auto}
+h1{font-size:1.4rem;margin:.2rem 0 .6rem}
+#live{min-height:3.2em;padding:.5rem .7rem;border-left:6px solid var(--sel);background:rgba(127,127,127,.15);margin-bottom:.7rem}
+#board{width:100%;max-width:520px;margin:0 auto .8rem;border:3px solid var(--fg)}
+.rank{display:flex}
+.sq{flex:1;aspect-ratio:1;border:0;border-radius:0;padding:0;font-size:min(9vw,46px);line-height:1;cursor:pointer;position:relative;color:#000}
+.sq.l{background:var(--l)}.sq.d{background:var(--d)}
+.sq[data-c=w]{color:#fff;text-shadow:0 0 2px #000,0 0 2px #000,0 0 3px #000}
+.sq[data-c=b]{color:#000;text-shadow:0 0 1px #fff}
+.sq.sel{outline:5px solid var(--sel);outline-offset:-5px;z-index:1}
+.sq.tgt::after{content:"";position:absolute;inset:34%;border-radius:50%;background:var(--tgt);opacity:.9}
+.sq:focus-visible{outline:5px solid var(--fg);outline-offset:-5px;z-index:2}
+.row{display:flex;flex-wrap:wrap;gap:.5rem;margin:.5rem 0}
+button.cmd{font:inherit;padding:.65rem .9rem;border:2px solid var(--btn);background:var(--btn);color:var(--btnfg);border-radius:8px;cursor:pointer}
+button.cmd:focus-visible,select:focus-visible,input:focus-visible{outline:4px solid var(--sel);outline-offset:2px}
+label{display:flex;flex-direction:column;font-size:.9rem;gap:.15rem}
+select{font:inherit;padding:.5rem;border-radius:8px;border:2px solid var(--fg);background:var(--bg);color:var(--fg)}
+#eng{font-size:.9rem;opacity:.85}
+#bar .cmd{font-size:.9rem;padding:.5rem .65rem}
+#result{border:3px solid var(--sel);padding:.6rem .8rem;margin-bottom:.7rem;border-radius:8px}
+h1:focus{outline:none}
+dialog{border:3px solid var(--fg);border-radius:12px;background:var(--bg);color:var(--fg);padding:1rem;width:min(86vw,360px)}
+dialog::backdrop{background:rgba(0,0,0,.55)}
+dialog h2{font-size:1.15rem;margin:.1rem 0 .7rem}
+.stack{display:flex;flex-direction:column;gap:.5rem}
+#an{width:min(92vw,520px)}
+#anOut{max-height:50vh;overflow:auto;margin:.5rem 0}
+#anOut p{margin:.5rem 0}
+.chk{flex-direction:row;align-items:center;gap:.5rem;font-size:1rem}
+</style>
+</head>
+<body>
+<body>
+<div id="live" role="status" aria-live="polite" aria-atomic="true">Завантаження…</div>
+
+<section id="start">
+  <h1 id="hStart" tabindex="-1">Шахи зі Stockfish</h1>
+  <div id="resume" hidden>
+    <p id="resumeInfo"></p>
+    <button class="cmd" id="bResume" disabled>Продовжити партію</button>
+  </div>
+  <h2 style="font-size:1.1rem;margin:1rem 0 .3rem">Нова гра</h2>
+  <div class="row">
+    <label for="level">Рівень суперника
+      <select id="level"></select>
+    </label>
+  </div>
+  <p id="eloNote" style="font-size:.85rem;opacity:.85;margin:.2rem 0">Stockfish підтримує рейтинг від 1320 до 3190. Чим вищий рівень, тим довше суперник обмірковує хід (на найвищих до 5 секунд). Elo приблизний: реальна сила може трохи відрізнятися.</p>
+  <div class="row">
+    <label for="color">Ваш колір
+      <select id="color"><option value="w">Білі</option><option value="b">Чорні</option><option value="r">Випадковий</option></select>
+    </label>
+    <label for="hints">Варіантів у підказці
+      <select id="hints">
+        <option value="1" selected>1 (найкращий хід)</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+      </select>
+    </label>
+  </div>
+  <label class="chk"><input type="checkbox" id="sayMoves"> Озвучувати можливі ходи одразу після вибору фігури</label>
+  <div class="row"><button class="cmd" id="bNew" disabled>Почати гру</button></div>
+  <label class="chk"><input type="checkbox" id="speak"> Озвучувати голосом браузера (якщо не користуєтесь VoiceOver)</label>
+  <p id="eng">Завантаження рушія…</p>
+</section>
+
+<section id="play" hidden>
+  <h1 id="hPlay" tabindex="-1" style="font-size:1.1rem;margin:.2rem 0 .5rem">Шахи</h1>
+  <div id="result" hidden>
+    <p id="resText" style="margin:.2rem 0 .6rem;font-weight:600"></p>
+    <div class="row" style="margin:0">
+      <button class="cmd" id="bAnalyse2">Аналіз партії</button>
+      <button class="cmd" id="bPgn2">Завантажити запис</button>
+      <button class="cmd" id="bBack2">Нова гра</button>
+    </div>
+  </div>
+  <div id="board" role="group" aria-label="Шахова дошка"></div>
+  <div class="row" id="bar" role="group" aria-label="Команди">
+    <button class="cmd" id="bLast">Останній хід</button>
+    <button class="cmd" id="bUndo">Взяти хід назад</button>
+    <button class="cmd" id="bCancel">Скасувати вибір</button>
+    <button class="cmd" id="bHint">Підказка</button>
+    <button class="cmd" id="bMore" aria-haspopup="dialog">Більше</button>
+  </div>
+  <textarea id="pgnBox" readonly hidden aria-label="Запис партії" rows="6" style="width:100%;font:14px monospace"></textarea>
+</section>
+
+<dialog id="menu" aria-labelledby="menuT">
+  <h2 id="menuT">Більше</h2>
+  <div class="stack">
+    <button class="cmd" id="bMine" data-m>Мої фігури</button>
+    <button class="cmd" id="bTheirs" data-m>Фігури суперника</button>
+    <button class="cmd" id="bAttack" data-m>Що під атакою</button>
+    <button class="cmd" id="bAnalyse" data-m>Аналіз партії</button>
+    <button class="cmd" id="bPgn" data-m>Зберегти запис</button>
+    <button class="cmd" id="bCopy" data-m>Скопіювати запис</button>
+    <button class="cmd" id="bBack" data-m>Нова гра</button>
+    <button class="cmd" id="menuClose">Закрити</button>
+  </div>
+</dialog>
+
+<dialog id="an" aria-labelledby="anT">
+  <h2 id="anT">Аналіз партії</h2>
+  <p id="anStatus" role="status" aria-live="polite"></p>
+  <div id="anOut"></div>
+  <div class="stack">
+    <button class="cmd" id="anCancel">Скасувати</button>
+    <button class="cmd" id="anClose" hidden>Закрити</button>
+  </div>
+</dialog>
+
+<dialog id="promo" aria-labelledby="promoT">
+  <h2 id="promoT">Перетворення пішака. Оберіть фігуру</h2>
+  <div class="stack">
+    <button class="cmd" data-p="q">Ферзь</button>
+    <button class="cmd" data-p="r">Тура</button>
+    <button class="cmd" data-p="b">Слон</button>
+    <button class="cmd" data-p="n">Кінь</button>
+    <button class="cmd" id="promoCancel">Скасувати</button>
+  </div>
+</dialog>
+
+<script type="module">
+import { Chess } from './chess.js';
+
+// Якщо файл рушія названо інакше — змініть тут:
+const ENGINE_FILE = 'stockfish-19-lite-single.js';
+
+const $ = id => document.getElementById(id);
+const NAMES = {p:'пішак',n:'кінь',b:'слон',r:'тура',q:'ферзь',k:'король'};
+const ACC   = {p:'пішака',n:'коня',b:'слона',r:'туру',q:'ферзя',k:'короля'};
+const PL    = {p:'пішаки',n:'коні',b:'слони',r:'тури',q:'ферзі',k:'королі'};
+const GLYPH = {p:'♟',n:'♞',b:'♝',r:'♜',q:'♛',k:'♚'};
+const LEVELS = {
+  novice: { skill: 0, ms: 150, depth: 1, label: 'новачок', tag: 'Skill 0' },
+  max: { ms: 5000, depth: 3, label: 'повна сила', tag: 'full strength' }
+};
+// Рушій підтримує Elo від 1320 до 3190; крок вибору — 100. Час на хід зростає з рівнем.
+const ELOS = [1320];
+for (let e = 1400; e <= 3100; e += 100) ELOS.push(e);
+ELOS.forEach(elo => {
+  LEVELS['e' + elo] = { elo, ms: Math.round(500 + (elo - 1320) / (3100 - 1320) * 4500), depth: elo < 1600 ? 1 : elo < 2400 ? 2 : 3, label: elo + ' Elo', tag: 'Elo ' + elo };
+});
+{
+  const sel = $('level');
+  const add = (v, t) => { const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o); };
+  add('novice', 'Новачок (найслабший)');
+  ELOS.forEach(e => add('e' + e, e + ' Elo'));
+  add('max', 'Максимум (повна сила)');
+  sel.value = 'e1900';
+}
+
+let gameLevel = 'e1900';
+let game = new Chess(), human = 'w', sel = null, targets = [], busy = false, over = false;
+let engine = null, lastText = 'Ходів ще не було.';
+let engineName = '', caps = { elo: false, min: 1320, max: 3190 };
+const cells = new Map(), order = [];
+
+const pname = p => {
+  const f = p.type === 'r';
+  return (p.color === 'w' ? (f ? 'біла' : 'білий') : (f ? 'чорна' : 'чорний')) + ' ' + NAMES[p.type];
+};
+
+function say(t, remember) {
+  if (remember) lastText = t;
+  const el = $('live'); el.textContent = '';
+  setTimeout(() => { el.textContent = t; }, 60);
+  if ($('speak').checked && 'speechSynthesis' in window) {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(t); u.lang = 'uk-UA'; speechSynthesis.speak(u);
+  }
+}
+
+function build() {
+  const b = $('board'); b.innerHTML = ''; cells.clear(); order.length = 0;
+  const flip = human === 'b';
+  const ranks = flip ? [1,2,3,4,5,6,7,8] : [8,7,6,5,4,3,2,1];
+  const files = flip ? 'hgfedcba' : 'abcdefgh';
+  for (const r of ranks) {
+    const row = document.createElement('div');
+    row.className = 'rank'; row.setAttribute('role', 'group'); row.setAttribute('aria-label', 'Рядок ' + r);
+    for (const f of files) {
+      const sq = f + r, btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'sq ' + (((f.charCodeAt(0) - 97 + r) % 2) ? 'd' : 'l');
+      btn.addEventListener('click', () => onSquare(sq));
+      row.appendChild(btn); cells.set(sq, btn); order.push(btn);
+    }
+    b.appendChild(row);
+  }
+  update();
+}
+
+function update() {
+  for (const [sq, btn] of cells) {
+    const p = game.get(sq), isSel = sel === sq, t = targets.find(m => m.to === sq);
+    btn.textContent = p ? GLYPH[p.type] + '\uFE0E' : '';
+    btn.dataset.c = p ? p.color : '';
+    btn.classList.toggle('sel', isSel);
+    btn.classList.toggle('tgt', !!t);
+    let l = sq + ', ' + (p ? pname(p) : 'порожньо');
+    if (isSel) l += ', вибрано';
+    if (t) l += p ? ', можна взяти' : ', можна піти';
+    btn.setAttribute('aria-label', l);
+  }
+  persist();
+}
+
+$('board').addEventListener('keydown', e => {
+  const d = {ArrowUp:-8, ArrowDown:8, ArrowLeft:-1, ArrowRight:1}[e.key];
+  if (!d) return;
+  const i = order.indexOf(document.activeElement); if (i < 0) return;
+  const col = i % 8 + (Math.abs(d) === 1 ? d : 0), j = i + d;
+  if (col < 0 || col > 7 || j < 0 || j > 63) return;
+  e.preventDefault(); order[j].focus();
+});
+
+function openDlg(d) { if (d.showModal) d.showModal(); else d.setAttribute('open', ''); }
+function closeDlg(d) {
+  if (d.close) d.close();
+  else { d.removeAttribute('open'); d.dispatchEvent(new Event('close')); }
+}
+function askPromotion() {
+  return new Promise(res => {
+    const d = $('promo'); let ch = null;
+    const onClick = e => {
+      const b = e.target.closest('button[data-p]');
+      if (b) { ch = b.dataset.p; closeDlg(d); }
+      else if (e.target.closest('#promoCancel')) closeDlg(d);
+    };
+    d.addEventListener('click', onClick);
+    d.addEventListener('close', () => { d.removeEventListener('click', onClick); res(ch); }, { once: true });
+    openDlg(d);
+  });
+}
+
+const KEY = 'shahy-save';
+function persist() {
+  try {
+    if (over || !game.history().length) localStorage.removeItem(KEY);
+    else localStorage.setItem(KEY, JSON.stringify({ human, level: gameLevel, moves: game.history() }));
+  } catch (e) {}
+}
+function loadSaved() {
+  try {
+    const s = JSON.parse(localStorage.getItem(KEY) || 'null');
+    return s && Array.isArray(s.moves) && s.moves.length ? s : null;
+  } catch (e) { return null; }
+}
+function show(name) {
+  $('start').hidden = name !== 'start'; $('play').hidden = name !== 'play';
+  $(name === 'start' ? 'hStart' : 'hPlay').focus();
+}
+function showResult(t) { $('resText').textContent = t + ' Партію завершено.'; $('result').hidden = false; }
+
+function lastFromHistory() {
+  const h = game.history({ verbose: true });
+  if (!h.length) return 'Ходів ще не було.';
+  const who = m => (m.color === human ? 'Ви' : 'Суперник');
+  const last = h[h.length - 1], prev = h[h.length - 2];
+  return (prev ? `${who(prev)}: ${hintText(prev)}. ` : '') + `${who(last)}: ${desc(last)}.`;
+}
+
+const SKEY = 'shahy-settings';
+function saveSettings() {
+  try {
+    localStorage.setItem(SKEY, JSON.stringify({ level: $('level').value, color: $('color').value,
+      hints: $('hints').value, say: $('sayMoves').checked, speak: $('speak').checked }));
+  } catch (e) {}
+}
+function loadSettings() {
+  try {
+    const t = JSON.parse(localStorage.getItem(SKEY) || 'null'); if (!t) return;
+    if (LEVELS[t.level]) $('level').value = t.level;
+    if (['w', 'b', 'r'].includes(t.color)) $('color').value = t.color;
+    if (['1', '2', '3'].includes(t.hints)) $('hints').value = t.hints;
+    $('sayMoves').checked = !!t.say; $('speak').checked = !!t.speak;
+  } catch (e) {}
+}
+['level', 'color', 'hints', 'sayMoves', 'speak'].forEach(id => $(id).addEventListener('change', saveSettings));
+
+function clearSel() { sel = null; targets = []; update(); }
+
+function onSquare(sq) {
+  if (over) return say('Партію завершено. Натисніть «Почати», щоб зіграти знову.');
+  if (busy || game.turn() !== human) return say('Зараз хід суперника.');
+  const p = game.get(sq);
+  const m = sel && targets.find(x => x.to === sq);
+  if (m) return playHuman(m);
+  if (sel && sq === sel) { clearSel(); return say('Вибір скасовано.'); }
+  if (p && p.color === human) return select(sq, p);
+  say(sel ? 'Сюди піти не можна. Оберіть інше поле або натисніть на вибрану фігуру, щоб скасувати.' : 'Оберіть свою фігуру.');
+}
+
+function select(sq, p) {
+  const mv = game.moves({ square: sq, verbose: true });
+  if (!mv.length) { sel = null; targets = []; update(); return say(`${pname(p)} ${sq}: ходів немає.`); }
+  sel = sq; targets = mv; update();
+  const seen = new Set(), list = [];
+  for (const m of mv) if (!seen.has(m.to)) { seen.add(m.to); list.push(m.to + (m.captured ? ' (взяття)' : '')); }
+  say($('sayMoves').checked
+    ? `Вибрано ${pname(p)} ${sq}. Можливі ходи: ${list.join(', ')}.`
+    : `Вибрано ${pname(p)} ${sq}. Можливих ходів: ${seen.size}.`);
+}
+
+function desc(mv) {
+  const pc = { type: mv.piece, color: mv.color };
+  let s;
+  if (mv.flags.includes('k')) s = 'коротка рокіровка';
+  else if (mv.flags.includes('q')) s = 'довга рокіровка';
+  else if (mv.captured) s = `${pname(pc)} ${mv.from} бере ${ACC[mv.captured]} на ${mv.to}`;
+  else s = `${pname(pc)} ${mv.from} — ${mv.to}`;
+  if (mv.promotion) s += `, стає: ${NAMES[mv.promotion]}`;
+  if (game.isCheckmate()) s += '. Шах і мат';
+  else if (game.isCheck()) s += '. Шах';
+  return s;
+}
+
+function endText() {
+  const t = endText0();
+  if (over) { persist(); showResult(t); }
+  return t;
+}
+function endText0() {
+  if (game.isCheckmate()) { over = true; return `Мат. Перемогли ${game.turn() === 'w' ? 'чорні' : 'білі'}${game.turn() === human ? '. Ви програли' : '. Ви перемогли'}.`; }
+  if (game.isStalemate()) { over = true; return 'Пат. Нічия.'; }
+  if (game.isDraw()) { over = true; return 'Нічия.'; }
+  return '';
+}
+
+async function playHuman(m) {
+  let promo = 'q';
+  if (m.promotion) {
+    promo = await askPromotion();
+    if (!promo) return say('Перетворення скасовано. Оберіть хід ще раз.');
+  }
+  const mv = game.move({ from: m.from, to: m.to, promotion: promo });
+  sel = null; targets = []; update();
+  let text = 'Ви: ' + desc(mv) + '.';
+  const e1 = endText();
+  if (e1) return say(text + ' ' + e1, true);
+  await engineTurn(text);
+}
+
+async function engineTurn(prefix) {
+  busy = true; $('eng').dataset.thinking = '1';
+  if (prefix) say(prefix + ' Суперник думає…');
+  const uci = await bestMove();
+  const mv = game.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || 'q' });
+  busy = false; delete $('eng').dataset.thinking;
+  update();
+  const mine = (prefix ? prefix + ' ' : '') + 'Суперник: ' + desc(mv) + '.';
+  const e2 = endText();
+  const tail = e2 ? ' ' + e2 : ' Ваш хід.';
+  say('Суперник: ' + desc(mv) + '.' + tail);
+  lastText = mine + tail;
+}
+
+/* ---------- рушії ---------- */
+function startEngine() {
+  return new Promise(res => {
+    let w;
+    try { w = new Worker(ENGINE_FILE); } catch (e) { return res(null); }
+    let t;
+    const fail = () => { clearTimeout(t); try { w.terminate(); } catch (e) {} res(null); };
+    t = setTimeout(fail, 10000);
+    w.onerror = fail;
+    w.onmessage = e => {
+      const l = String(e.data).trim();
+      if (l.startsWith('id name ')) engineName = l.slice(8);
+      const m = l.match(/^option name UCI_Elo type spin default \d+ min (\d+) max (\d+)/);
+      if (m) { caps.elo = true; caps.min = +m[1]; caps.max = +m[2]; }
+      if (l.includes('uciok')) w.postMessage('isready');
+      else if (l.includes('readyok')) { clearTimeout(t); w.onmessage = w.onerror = null; res(w); }
+    };
+    w.postMessage('uci');
+  });
+}
+
+// Надіслати команди й дочекатися рядка, який задовольняє умову until.
+function ask(cmds, until, timeout) {
+  return new Promise((res, rej) => {
+    const t = setTimeout(() => { engine.onmessage = engine.onerror = null; rej(new Error('timeout')); }, timeout);
+    engine.onerror = () => { clearTimeout(t); rej(new Error('worker error')); };
+    engine.onmessage = e => {
+      const r = until(String(e.data).trim());
+      if (r) { clearTimeout(t); engine.onmessage = engine.onerror = null; res(r); }
+    };
+    cmds.forEach(c => engine.postMessage(c));
+  });
+}
+
+function optionCmds(L) {
+  let elo = L.elo, skill = L.skill ?? 20;
+  if (elo && caps.elo) elo = Math.min(caps.max, Math.max(caps.min, elo));
+  else if (elo) { skill = Math.round((elo - 1320) / (3190 - 1320) * 20); elo = 0; }
+  const o = ['setoption name MultiPV value 1', `setoption name UCI_LimitStrength value ${!!elo}`];
+  if (elo) o.push(`setoption name UCI_Elo value ${elo}`);
+  o.push(`setoption name Skill Level value ${skill}`);
+  return o;
+}
+
+async function sfBest(L = LEVELS[$('level').value]) {
+  await ask([...optionCmds(L), 'isready'], l => l.includes('readyok'), 8000);
+  return ask([`position fen ${game.fen()}`, `go movetime ${L.ms}`],
+    l => (l.startsWith('bestmove') ? l.split(' ')[1] : ''), L.ms + 10000);
+}
+
+const VAL = {p:100,n:320,b:330,r:500,q:900,k:0};
+function material(g) {
+  let s = 0;
+  for (const row of g.board()) for (const c of row) if (c) s += (c.color === 'w' ? 1 : -1) * VAL[c.type];
+  return s;
+}
+function search(g, d, a, b) {
+  if (g.isCheckmate()) return g.turn() === 'w' ? -99999 : 99999;
+  if (g.isDraw()) return 0;
+  if (d === 0) return material(g);
+  const w = g.turn() === 'w'; let best = w ? -Infinity : Infinity;
+  for (const m of g.moves()) {
+    g.move(m); const v = search(g, d - 1, a, b); g.undo();
+    if (w) { best = Math.max(best, v); a = Math.max(a, v); } else { best = Math.min(best, v); b = Math.min(b, v); }
+    if (b <= a) break;
+  }
+  return best;
+}
+function builtinBest(L = LEVELS[$('level').value]) {
+  return new Promise(res => setTimeout(() => {
+    const g = new Chess(game.fen()), d = L.depth, w = g.turn() === 'w';
+    const moves = g.moves({ verbose: true }).sort(() => Math.random() - .5);
+    let best = null, bv = w ? -Infinity : Infinity;
+    for (const m of moves) {
+      g.move({ from: m.from, to: m.to, promotion: m.promotion }); const v = search(g, d - 1, -Infinity, Infinity); g.undo();
+      if (w ? v > bv : v < bv) { bv = v; best = m; }
+    }
+    res(best.from + best.to + (best.promotion || ''));
+  }, 30));
+}
+async function bestMove(L) {
+  if (engine) {
+    try { return await sfBest(L); }
+    catch (e) { try { engine.terminate(); } catch (x) {} engine = null; setEngineLabel(false); }
+  }
+  return builtinBest(L);
+}
+function setEngineLabel(ok) {
+  $('eng').textContent = ok
+    ? `Суперник: ${engineName || 'Stockfish'}.`
+    : `Суперник: вбудований простий ШІ (файл ${ENGINE_FILE} не знайдено або не запустився).`;
+}
+
+/* ---------- команди ---------- */
+function listPieces(color) {
+  const by = {};
+  for (const row of game.board()) for (const c of row) if (c && c.color === color) (by[c.type] ||= []).push(c.square);
+  const parts = [];
+  for (const t of ['k','q','r','b','n','p']) if (by[t]) parts.push(`${by[t].length > 1 ? PL[t] : NAMES[t]}: ${by[t].join(', ')}`);
+  return parts.join('. ') + '.';
+}
+
+$('bMine').onclick = () => say('Ваші фігури. ' + listPieces(human));
+$('bTheirs').onclick = () => say('Фігури суперника. ' + listPieces(human === 'w' ? 'b' : 'w'));
+$('bLast').onclick = () => say(lastText);
+$('bCancel').onclick = () => { clearSel(); say('Вибір скасовано.'); };
+$('bUndo').onclick = () => {
+  if (busy) return say('Зачекайте, суперник думає.');
+  const n = game.turn() === human ? 2 : 1;
+  for (let i = 0; i < n; i++) game.undo();
+  over = false; $('result').hidden = true; clearSel(); lastText = lastFromHistory();
+  if (game.turn() !== human) { say('Хід повернуто. Суперник думає…'); engineTurn(''); }
+  else say('Хід повернуто. Ваш хід.');
+};
+/* ---------- оцінка, кілька ходів (MultiPV), WDL, аналіз партії ---------- */
+function parseInfo(l) {
+  if (!l.startsWith('info') || !l.includes(' pv ') || l.includes('bound')) return null;
+  const t = l.split(/\s+/), at = k => t.indexOf(k);
+  const si = at('score'), pi = at('pv'); if (si < 0 || pi < 0) return null;
+  const mi = at('multipv'), wi = at('wdl'), di = at('depth');
+  return { idx: mi < 0 ? 1 : +t[mi + 1], kind: t[si + 1], val: +t[si + 2], move: t[pi + 1],
+    depth: di < 0 ? 0 : +t[di + 1], wdl: wi < 0 ? null : [+t[wi + 1], +t[wi + 2], +t[wi + 3]] };
+}
+const cpOf = p => p.kind === 'mate' ? Math.sign(p.val) * (10000 - Math.abs(p.val) * 10) : p.val;
+const winP = cp => 1 / (1 + Math.exp(-0.00368208 * cp));
+function cpText(cp) {
+  if (Math.abs(cp) >= 9000) return cp > 0 ? 'вигране матом' : 'програно матом';
+  if (Math.abs(cp) < 5) return 'рівно';
+  return (cp > 0 ? 'плюс ' : 'мінус ') + (Math.abs(cp) / 100).toFixed(1).replace('.', ',');
+}
+const evalText = p => p.kind === 'mate'
+  ? (p.val > 0 ? `мат на вашу користь за ${p.val}` : `мат проти вас за ${-p.val}`) : cpText(p.val);
+const wdlText = w => `виграш ${Math.round(w[0] / 10)}, нічия ${Math.round(w[1] / 10)}, програш ${Math.round(w[2] / 10)} відсотків`;
+const findMove = (moves, u) => moves.find(m => m.from === u.slice(0, 2) && m.to === u.slice(2, 4) && (m.promotion || '') === (u[4] || ''));
+
+// n найкращих ходів у позиції з оцінками (повна сила, показ WDL).
+async function analyse(fen, ms, n) {
+  const best = {};
+  await ask([`setoption name MultiPV value ${n}`, 'setoption name UCI_LimitStrength value false',
+    'setoption name Skill Level value 20', 'setoption name UCI_ShowWDL value true', 'isready'],
+    l => l.includes('readyok'), 8000);
+  await ask([`position fen ${fen}`, `go movetime ${ms}`],
+    l => { const p = parseInfo(l); if (p) best[p.idx] = p; return l.startsWith('bestmove'); }, ms + 10000);
+  return Object.keys(best).sort((a, b) => a - b).map(k => best[k]);
+}
+
+function hintText(mv) {
+  const pc = { type: mv.piece, color: mv.color };
+  let t;
+  if (mv.flags.includes('k')) t = 'коротка рокіровка';
+  else if (mv.flags.includes('q')) t = 'довга рокіровка';
+  else if (mv.captured) t = `${pname(pc)} ${mv.from} бере ${ACC[mv.captured]} на ${mv.to}`;
+  else t = `${pname(pc)} ${mv.from} — ${mv.to}`;
+  if (mv.promotion) t += `, стає: ${NAMES[mv.promotion]}`;
+  return t;
+}
+
+async function hint() {
+  if (over) return say('Партію завершено.');
+  if (busy || game.turn() !== human) return say('Зараз хід суперника.');
+  busy = true; say('Підказка: думаю…');
+  try {
+    const moves = game.moves({ verbose: true }), parts = [];
+    if (engine) {
+      try {
+        const hn = +$('hints').value || 1;
+        (await analyse(game.fen(), hn > 1 ? 2500 : 2000, hn)).forEach((p, i) => {
+          const mv = findMove(moves, p.move); if (!mv) return;
+          parts.push(`${hn > 1 ? 'Варіант ' + (i + 1) : 'Найкращий хід'}: ${hintText(mv)}, ${evalText(p)}` + (i === 0 && p.wdl ? `. Шанси: ${wdlText(p.wdl)}` : ''));
+        });
+      } catch (e) { try { engine.terminate(); } catch (x) {} engine = null; setEngineLabel(false); }
+    }
+    if (!parts.length) {
+      const mv = findMove(moves, await bestMove({ skill: 20, ms: 2500, depth: 3 }));
+      if (mv) parts.push(hintText(mv));
+    }
+    say(parts.length ? 'Підказка. ' + parts.join('. ') + '.' : 'Не вдалося підібрати підказку.');
+  } finally { busy = false; }
+}
+
+let anCancel = false;
+async function analyseGame() {
+  if (busy) return say('Зачекайте, суперник думає.');
+  if (!engine) return say('Аналіз потребує Stockfish, а він зараз недоступний.');
+  const hist = game.history({ verbose: true });
+  if (hist.length < 2) return say('Замало ходів для аналізу.');
+  busy = true; anCancel = false;
+  const out = $('anOut'), st = $('anStatus');
+  out.replaceChildren(); st.textContent = 'Починаю аналіз…';
+  $('anCancel').hidden = false; $('anClose').hidden = true; openDlg($('an'));
+  const para = t => { const p = document.createElement('p'); p.textContent = t; out.appendChild(p); return p; };
+  try {
+    const g = new Chess(), fens = [g.fen()];
+    hist.forEach(m => { g.move(m.san); fens.push(g.fen()); });
+    const sc = [], bst = [];
+    for (let i = 0; i < fens.length && !anCancel; i++) {
+      const c = new Chess(fens[i]);
+      if (c.isCheckmate()) { sc.push(-10000); bst.push(null); }
+      else if (c.isGameOver()) { sc.push(0); bst.push(null); }
+      else { const p = (await analyse(fens[i], 600, 1))[0]; sc.push(p ? cpOf(p) : 0); bst.push(p ? p.move : null); }
+      if (i % 4 === 0) st.textContent = `Аналіз: позиція ${i + 1} з ${fens.length}`;
+    }
+    if (anCancel) { closeDlg($('an')); return say('Аналіз скасовано.'); }
+    const cnt = { w: [0, 0, 0], b: [0, 0, 0] }, items = [];
+    hist.forEach((m, i) => {
+      const u = m.from + m.to + (m.promotion || '');
+      const loss = bst[i] === u ? 0 : winP(sc[i]) - winP(-sc[i + 1]);
+      const k = loss >= 0.15 ? 2 : loss >= 0.10 ? 1 : loss >= 0.05 ? 0 : -1;
+      if (k < 0) return;
+      cnt[m.color][k]++;
+      if (k >= 1 && m.color === human) items.push({ i, m, k });
+    });
+    const fmt = a => `неточностей ${a[0]}, помилок ${a[1]}, грубих прорахунків ${a[2]}`;
+    const first = para(`Проаналізовано ходів: ${hist.length}. Ваші ходи: ${fmt(cnt[human])}. Ходи суперника: ${fmt(cnt[human === 'w' ? 'b' : 'w'])}.`);
+    if (!items.length) para('Серйозних помилок у ваших ходах не знайдено.');
+    for (const it of items) {
+      const b = bst[it.i] && findMove(new Chess(fens[it.i]).moves({ verbose: true }), bst[it.i]);
+      para(`Хід ${Math.floor(it.i / 2) + 1}${it.m.color === 'b' ? ' (чорні)' : ''}: ${hintText(it.m)} — ${['', 'помилка', 'грубий прорахунок'][it.k]}. `
+        + (b ? `Краще було: ${hintText(b)}. ` : '') + `Оцінка для вас змінилась з «${cpText(sc[it.i])}» на «${cpText(-sc[it.i + 1])}».`);
+    }
+    st.textContent = 'Аналіз завершено.';
+    $('anCancel').hidden = true; $('anClose').hidden = false;
+    first.tabIndex = -1; first.focus();
+  } catch (e) {
+    st.textContent = 'Аналіз перервано: рушій не відповів.';
+    $('anCancel').hidden = true; $('anClose').hidden = false;
+    try { engine.terminate(); } catch (x) {} engine = null; setEngineLabel(false);
+  } finally { busy = false; }
+}
+
+$('anCancel').onclick = () => { anCancel = true; };
+$('anClose').onclick = () => closeDlg($('an'));
+$('an').addEventListener('close', () => { anCancel = true; });
+$('bAnalyse').onclick = $('bAnalyse2').onclick = analyseGame;
+
+function attacked() {
+  const me = human, op = me === 'w' ? 'b' : 'w', mine = [], theirs = [];
+  for (const row of game.board()) for (const c of row) {
+    if (!c) continue;
+    const f = c.type === 'r';
+    if (c.color === me && game.isAttacked(c.square, op)) {
+      if (c.type === 'k') mine.push(`король ${c.square} під шахом`);
+      else mine.push(`${NAMES[c.type]} ${c.square} (${game.isAttacked(c.square, me) ? (f ? 'захищена' : 'захищений') : (f ? 'не захищена' : 'не захищений')})`);
+    } else if (c.color === op && c.type !== 'k' && game.isAttacked(c.square, me)) {
+      theirs.push(`${NAMES[c.type]} ${c.square} (${game.isAttacked(c.square, op) ? (f ? 'захищена' : 'захищений') : (f ? 'не захищена' : 'не захищений')})`);
+    }
+  }
+  say(`Ваші фігури під атакою: ${mine.join('; ') || 'немає'}. Фігури суперника, які ви атакуєте: ${theirs.join('; ') || 'немає'}.`);
+}
+
+$('bHint').onclick = hint;
+$('bAttack').onclick = attacked;
+$('bMore').onclick = () => openDlg($('menu'));
+$('menuClose').onclick = () => closeDlg($('menu'));
+// Пункт меню спершу закриває вікно, потім виконується його дія.
+$('menu').addEventListener('click', e => { if (e.target.closest('button[data-m]')) closeDlg($('menu')); }, true);
+
+$('bNew').onclick = startGame;
+$('bResume').onclick = resume;
+$('bBack').onclick = $('bBack2').onclick = backToStart;
+
+/* ---------- запис партії (PGN) ---------- */
+function pgnText() {
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  const date = `${d.getFullYear()}.${p(d.getMonth() + 1)}.${p(d.getDate())}`;
+  let res = '*';
+  if (game.isCheckmate()) res = game.turn() === 'b' ? '1-0' : '0-1';
+  else if (game.isDraw()) res = '1/2-1/2';
+  const eng = (engine ? (engineName || 'Stockfish') : 'Built-in AI') + ' (' + (LEVELS[gameLevel] || LEVELS.max).tag + ')';
+  const me = 'Player';
+  const head = [
+    ['Event', 'Casual game'], ['Site', 'Accessible chess (GitHub Pages)'], ['Date', date],
+    ['White', human === 'w' ? me : eng], ['Black', human === 'w' ? eng : me], ['Result', res]
+  ].map(([k, v]) => `[${k} "${v}"]`).join('\n');
+  const h = game.history();
+  let moves = '';
+  h.forEach((m, i) => { moves += (i % 2 ? '' : (i / 2 + 1) + '. ') + m + ' '; });
+  return head + '\n\n' + moves + res + '\n';
+}
+
+const savePgn = () => {
+  if (!game.history().length) return say('Ходів ще не було, записувати нічого.');
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  const name = `shahy-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.pgn`;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([pgnText()], { type: 'text/plain' }));
+  a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  say('Запис партії готовий до завантаження. Підтвердьте завантаження у вікні браузера.');
+};
+$('bPgn').onclick = $('bPgn2').onclick = savePgn;
+
+$('bCopy').onclick = async () => {
+  if (!game.history().length) return say('Ходів ще не було, записувати нічого.');
+  const t = pgnText();
+  try { await navigator.clipboard.writeText(t); say('Запис партії скопійовано.'); }
+  catch (e) {
+    const b = $('pgnBox'); b.hidden = false; b.value = t; b.focus(); b.select();
+    say('Не вдалося скопіювати автоматично. Запис показано в текстовому полі нижче.');
+  }
+};
+
+async function startGame() {
+  const pick = $('color').value, rnd = pick === 'r';
+  human = rnd ? (Math.random() < 0.5 ? 'w' : 'b') : pick;
+  gameLevel = $('level').value; $('pgnBox').hidden = true; $('result').hidden = true;
+  game = new Chess(); sel = null; targets = []; over = false; busy = false;
+  if (engine) engine.postMessage('ucinewgame');
+  lastText = 'Ходів ще не було.';
+  show('play'); build();
+  say(`Нова гра. Рівень суперника: ${LEVELS[gameLevel].label}. Ви граєте ${human === 'w' ? 'білими' : 'чорними'}${rnd ? ' (колір обрано випадково)' : ''}. Дошка читається ${human === 'w' ? 'від восьмого рядка' : 'від першого рядка'}.${human === 'w' ? ' Ваш хід.' : ''}`);
+  if (human === 'b') {
+    say(`Нова гра. Рівень суперника: ${LEVELS[gameLevel].label}. Ви граєте чорними${rnd ? ' (колір обрано випадково)' : ''}. Суперник думає…`);
+    await engineTurn('');
+  }
+}
+
+async function resume() {
+  const s = loadSaved(); if (!s) return;
+  human = s.human; gameLevel = LEVELS[s.level] ? s.level : 'e1900'; $('level').value = gameLevel; $('color').value = s.human;
+  game = new Chess();
+  try { for (const m of s.moves) game.move(m); } catch (e) { game = new Chess(); return say('Не вдалося відновити партію.'); }
+  sel = null; targets = []; over = false; busy = false;
+  $('pgnBox').hidden = true; $('result').hidden = true;
+  if (engine) engine.postMessage('ucinewgame');
+  lastText = lastFromHistory();
+  show('play'); build();
+  if (game.turn() === human) say(`Партію відновлено. Зроблено ходів: ${s.moves.length}. Ваш хід.`);
+  else { say('Партію відновлено. Суперник думає…'); await engineTurn(''); }
+}
+
+function backToStart() {
+  if (busy) return say('Зачекайте, суперник думає.');
+  const s = loadSaved();
+  $('resume').hidden = !s;
+  if (s) $('resumeInfo').textContent = `Є незавершена партія: ви граєте ${s.human === 'w' ? 'білими' : 'чорними'}, зроблено ходів: ${s.moves.length}.`;
+  show('start');
+  say(s ? 'Налаштування. Можна продовжити незавершену партію або почати нову.' : 'Налаштування нової гри. Оберіть рівень і колір.');
+}
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+{
+  const sv = loadSaved();
+  loadSettings();
+  if (sv) { $('resume').hidden = false; $('resumeInfo').textContent = `Є незавершена партія: ви граєте ${sv.human === 'w' ? 'білими' : 'чорними'}, зроблено ходів: ${sv.moves.length}.`; }
+  engine = await startEngine();
+  setEngineLabel(!!engine);
+  $('bNew').disabled = false; $('bResume').disabled = false;
+  say(sv ? 'Шахи. Є незавершена партія, її можна продовжити. Або оберіть рівень і колір для нової гри.' : 'Шахи. Оберіть рівень і колір, потім натисніть «Почати гру».');
+}
+</script>
+</body>
+</html>
